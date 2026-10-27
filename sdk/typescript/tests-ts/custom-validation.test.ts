@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  cp,
   mkdir,
   readFile,
   rename,
@@ -559,6 +560,30 @@ describe("custom validation", () => {
     });
   });
 
+  test.each([{ artifacts: [] }, { artifacts: null }])(
+    "validates an unfinished draft with %j",
+    async ({ artifacts }) => {
+      const f = await fixture();
+      const manifest = await json<{ scan: Record<string, unknown> }>(
+        join(f.scanDir, "scan-manifest.json"),
+      );
+      manifest.scan["artifacts"] = artifacts;
+      manifest.scan["sealedAt"] = null;
+      await save(join(f.scanDir, "scan-manifest.json"), manifest);
+      const run = mock(async () => JSON.stringify(result("reportable")));
+      await runCustomValidation({ ...f, run });
+      expect(run).toHaveBeenCalledTimes(1);
+      const findings = await json<FindingsDocument>(
+        join(f.scanDir, "findings.json"),
+      );
+      expect(findings.findings).toHaveLength(1);
+      expect(findings.findings[0]).toMatchObject({
+        identity: f.findings.findings[0]!.identity,
+        validation: { disposition: "reportable" },
+      });
+    },
+  );
+
   test.each([
     "sealedAt",
     "artifacts",
@@ -571,7 +596,14 @@ describe("custom validation", () => {
       join(f.scanDir, "scan-manifest.json"),
     );
     if (kind === "sealedAt") manifest.scan.sealedAt = "2026-01-01T00:00:00Z";
-    if (kind === "artifacts") manifest.scan.artifacts = [];
+    if (kind === "artifacts")
+      manifest.scan.artifacts = [
+        {
+          path: "findings.json",
+          sha256: "0".repeat(64),
+          mediaType: "application/json",
+        },
+      ];
     if (kind === "manifest ID") manifest.scan.id = randomUUID();
     if (kind === "findings ID" || kind === "coverage ID") {
       const name = kind === "findings ID" ? "findings.json" : "coverage.json";
@@ -607,6 +639,99 @@ describe("custom validation", () => {
       expect(
         await json<FindingsDocument>(join(f.scanDir, "findings.json")),
       ).toEqual(f.findings);
+    },
+  );
+
+  test.each([
+    ["bundled", ""],
+    ["unmarked oneOf", "coverage/deferred/0/paths/1"],
+    ["additional pattern", "coverage/deferred/0/paths/1"],
+    ["referenced array", "coverage/checkedPaths"],
+    ["conditional", "must have required property 'reviewReceipt'"],
+    ["referenced predicate", "must have required property 'reviewReceipt'"],
+  ])(
+    "honors %s deferred path rules before custom validation",
+    async (rules, expectedError) => {
+      const f = await fixture();
+      const path = join(f.scanDir, "coverage.json");
+      const coverage = await json<CoverageDocument>(path);
+      coverage.deferred = [
+        {
+          id: "pending",
+          reason: "Review pending.",
+          paths: ["src/valid", "../outside"],
+        },
+      ];
+      await save(path, coverage);
+      const run = mock(async () => JSON.stringify(result("reportable")));
+      if (rules === "bundled") {
+        await runCustomValidation({ ...f, run });
+        expect(run).toHaveBeenCalledTimes(1);
+        expect((await json<CoverageDocument>(path)).deferred).toEqual(
+          coverage.deferred,
+        );
+        return;
+      }
+      const pluginRoot = join(f.root, "plugin");
+      await cp(join(f.pluginRoot, "schemas"), join(pluginRoot, "schemas"), {
+        recursive: true,
+      });
+      const schemaPath = join(pluginRoot, "schemas", "coverage.schema.json");
+      const schema = JSON.parse(await readFile(schemaPath, "utf8"));
+      const deferred = schema.properties.deferred.items;
+      const paths = deferred.properties.paths;
+      if (rules === "unmarked oneOf") delete paths.items.oneOf[1].$comment;
+      if (rules === "additional pattern") paths.items.pattern = "^src/";
+      if (rules === "referenced array") {
+        schema.$id = "relative/coverage.json";
+        paths.$id = "deferred-paths.json";
+        schema.$defs = { ...schema.$defs, sharedPaths: paths };
+        schema.properties.deferred.items.properties.paths = {
+          $ref: "#/$defs/sharedPaths",
+        };
+        schema.properties.checkedPaths = {
+          anyOf: [{ $ref: "#/$defs/sharedPaths" }, { type: "null" }],
+        };
+        await save(path, {
+          ...coverage,
+          checkedPaths: ["src/other", "../outside"],
+        });
+      }
+      if (rules === "conditional") {
+        schema.if = {
+          properties: { deferred: { $ref: "#/properties/deferred" } },
+        };
+        schema.then = { required: ["reviewReceipt"] };
+      }
+      if (rules === "referenced predicate") {
+        deferred.properties.reviewReceipt = { type: "boolean" };
+        deferred.if = {
+          properties: {
+            paths: {
+              contains: {
+                $ref: "#/properties/deferred/items/properties/paths/items/oneOf/1",
+              },
+            },
+          },
+        };
+        deferred.then = { required: ["reviewReceipt"] };
+      }
+      await save(schemaPath, schema);
+      await expect(
+        runCustomValidation({ ...f, pluginRoot, run }),
+      ).rejects.toThrow(expectedError);
+      expect(run).not.toHaveBeenCalled();
+      if (rules === "referenced array" || rules === "referenced predicate") {
+        if (rules === "referenced array")
+          Object.assign(coverage, { checkedPaths: ["src/other"] });
+        else Object.assign(coverage.deferred[0]!, { reviewReceipt: true });
+        await save(path, coverage);
+        await runCustomValidation({ ...f, pluginRoot, run });
+        expect(run).toHaveBeenCalledTimes(1);
+        expect((await json<CoverageDocument>(path)).deferred).toEqual(
+          coverage.deferred,
+        );
+      }
     },
   );
 
