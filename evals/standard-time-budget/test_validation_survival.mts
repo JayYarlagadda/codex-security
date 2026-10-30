@@ -8,6 +8,7 @@ import { temporaryDirectory } from "../../plugins/codex-security/mcp-app/tests/s
 import type { ThreadEvent } from "../../sdk/typescript/node_modules/@openai/codex-sdk/dist/index.js";
 import * as sdk from "../../sdk/typescript/dist/api.js";
 import type {
+  CoverageDocument,
   FindingsDocument,
   ScanManifest,
 } from "../../sdk/typescript/src/models.js";
@@ -80,6 +81,15 @@ for (const deferred of [false, true]) {
     assert.equal(gradeResult({ findings }, prepared.fixture).passed, true);
     const withheld = prepared.fixture.positives.at(-1)!;
     const accepted = deferred ? findings.slice(0, -1) : findings;
+    const deferredWork: CoverageDocument["deferred"] = deferred
+      ? [
+          {
+            id: withheld.id,
+            reason: `Unverified candidate: ${withheld.id}`,
+            paths: [withheld.path],
+          },
+        ]
+      : [];
     const commands: string[] = [];
     let stateDirectory = "";
     let scanId = "";
@@ -169,14 +179,7 @@ for (const deferred of [false, true]) {
                 reviewState: {
                   surfaces: [],
                   explicitExclusions: [],
-                  deferred: deferred
-                    ? [
-                        {
-                          reason: `Unverified candidate: ${withheld.id}`,
-                          paths: [withheld.path],
-                        },
-                      ]
-                    : [],
+                  deferred: deferredWork,
                 },
               };
               await recordCodexSecurityScanDraftViaWorkbench(
@@ -247,6 +250,20 @@ for (const deferred of [false, true]) {
     );
     assert.equal(manifest.scan.status, "completed");
     assert.ok(manifest.scan.sealedAt);
+    const head: { checkpoint: string } = JSON.parse(
+      await readFile(
+        join(result.report.scanDir!, "checkpoint-head.json"),
+        "utf8",
+      ),
+    );
+    const checkpoint: { reviewState: Pick<CoverageDocument, "deferred"> } =
+      JSON.parse(
+        await readFile(
+          join(result.report.scanDir!, "checkpoints", head.checkpoint),
+          "utf8",
+        ),
+      );
+    assert.deepEqual(checkpoint.reviewState.deferred, deferredWork);
     const report = await readFile(result.report.reportPath!, "utf8");
     for (const finding of accepted) assert.ok(report.includes(finding.title));
     if (deferred) assert.equal(report.includes(findings.at(-1)!.title), false);

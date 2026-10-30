@@ -129,6 +129,7 @@ checkpoint, a terminal draft, completion, sealing, report generation, and final
 grading. It checks that finding identity, locations, validation details, and
 verbatim source evidence survive. A paired control mentions every candidate in
 discovery output but leaves one unverified in deferred work; that candidate
-must remain missing from final recall, even though the scan completes. These
-checks exercise result retention and grading, not model discovery quality or
+must remain missing from final recall and retained in the archived checkpoint's
+deferred work, even though the scan completes. These checks exercise result
+retention and grading, not model discovery quality or
 the correctness of model-generated validation decisions.
