@@ -67,6 +67,7 @@ import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
 import { formatCliHelp } from "./cli-help.js";
 import { formatCoverageScope } from "./coverage-presentation.js";
 import { resolveSkillAuthentication } from "./skill-authentication.js";
+import { skillPromptRequiresFile, withSkillPrompt } from "./skill-prompt.js";
 import { scanLogsJson } from "./cli-scan-logs-json.js";
 import {
   ARTIFACT_EXPORT_FILENAMES,
@@ -144,7 +145,6 @@ import {
   parseFindingVerifications,
   remediationPrompt,
   verificationBatches,
-  VerificationFindingTooLargeError,
   VerificationModeSchema,
   type FindingPatch,
   type FindingVerification,
@@ -6355,8 +6355,6 @@ export async function main(
           return undefined;
         } catch (error) {
           exitCode = 2;
-          if (error instanceof VerificationFindingTooLargeError)
-            batchedVerification = true;
           const message = errorMessage(error);
           if (workerDiagnostic === undefined || batchedVerification)
             await reportDiagnostic(
@@ -9072,104 +9070,125 @@ async function runSkill(
     },
   );
   options.signal?.throwIfAborted();
-  return dependencies.runCodex(
-    [
-      ...(appServer
-        ? ["app-server"]
-        : ["exec", "--ignore-user-config", "--thread-source", threadSource]),
-      "--disable",
-      "plugins",
-      ...(appServer ? [] : ["--ephemeral", "--color", "never", "--json"]),
-      "--config",
-      `model=${quoteTomlString(model)}`,
-      "--config",
-      `model_reasoning_effort=${quoteTomlString(reasoningEffort)}`,
-      ...(options.serviceTier === undefined
-        ? []
-        : ["--config", `service_tier=${JSON.stringify(options.serviceTier)}`]),
-      ...(overrides["daybreak"] === undefined
-        ? []
-        : ["--config", `daybreak=${inlineToml(overrides["daybreak"])}`]),
-      ...Object.entries(options.daybreakFeatures ?? {}).flatMap(
-        ([key, value]) => ["--config", `features.${key}=${inlineToml(value)}`],
-      ),
-      ...codex
-        .filter(
-          (value) =>
-            value.startsWith("analytics.") || value.startsWith("analytics="),
-        )
-        .flatMap((value) => ["--config", value]),
-      ...(options.otel === undefined
-        ? []
-        : ["--config", `otel=${inlineToml(options.otel)}`]),
-      ...(provider === undefined
-        ? []
-        : ["--config", `model_provider=${JSON.stringify(provider)}`]),
-      ...modelProviderConfigOverride(effectiveOverrides).flatMap((value) => [
+  const run = (prompt: string, signal = options.signal) =>
+    dependencies.runCodex(
+      [
+        ...(appServer
+          ? ["app-server"]
+          : ["exec", "--ignore-user-config", "--thread-source", threadSource]),
+        "--disable",
+        "plugins",
+        ...(appServer ? [] : ["--ephemeral", "--color", "never", "--json"]),
         "--config",
-        value,
-      ]),
-      "--config",
-      verify || assess
-        ? 'approval_policy="on-request"'
-        : 'approval_policy="never"',
-      ...(verify || assess
-        ? ["--config", 'approvals_reviewer="auto_review"']
-        : []),
-      "--config",
-      requestContext.configOverride,
-      ...(options.safetyIdentifier === undefined
-        ? []
-        : [
+        `model=${quoteTomlString(model)}`,
+        "--config",
+        `model_reasoning_effort=${quoteTomlString(reasoningEffort)}`,
+        ...(options.serviceTier === undefined
+          ? []
+          : [
+              "--config",
+              `service_tier=${JSON.stringify(options.serviceTier)}`,
+            ]),
+        ...(overrides["daybreak"] === undefined
+          ? []
+          : ["--config", `daybreak=${inlineToml(overrides["daybreak"])}`]),
+        ...Object.entries(options.daybreakFeatures ?? {}).flatMap(
+          ([key, value]) => [
             "--config",
-            `safety_identifier=${JSON.stringify(options.safetyIdentifier)}`,
-          ]),
-      ...(appServer
-        ? []
-        : [
-            "--sandbox",
-            validate ? "read-only" : "workspace-write",
-            ...(validate ? ["--config", 'web_search="disabled"'] : []),
-            ...(schemaPath === undefined
-              ? []
-              : ["--output-schema", schemaPath]),
-            "--skip-git-repo-check",
-            "--cd",
-            directory,
-            "-",
-          ]),
-    ],
-    {
-      command: verify ? "verify-fix" : patch || assess ? "patch" : "validate",
-      signal: options.signal,
-      auth: options.auth ?? "auto",
-      directory,
-      modelProvider: provider,
-      codexOverrides: effectiveOverrides,
-      stdout,
-      stderr,
-      ...(responseSchema === undefined ? {} : { responseSchema }),
-      ...(appServer
-        ? {
-            appServer: {
+            `features.${key}=${inlineToml(value)}`,
+          ],
+        ),
+        ...codex
+          .filter(
+            (value) =>
+              value.startsWith("analytics.") || value.startsWith("analytics="),
+          )
+          .flatMap((value) => ["--config", value]),
+        ...(options.otel === undefined
+          ? []
+          : ["--config", `otel=${inlineToml(options.otel)}`]),
+        ...(provider === undefined
+          ? []
+          : ["--config", `model_provider=${JSON.stringify(provider)}`]),
+        ...modelProviderConfigOverride(effectiveOverrides).flatMap((value) => [
+          "--config",
+          value,
+        ]),
+        "--config",
+        verify || assess
+          ? 'approval_policy="on-request"'
+          : 'approval_policy="never"',
+        ...(verify || assess
+          ? ["--config", 'approvals_reviewer="auto_review"']
+          : []),
+        "--config",
+        requestContext.configOverride,
+        ...(options.safetyIdentifier === undefined
+          ? []
+          : [
+              "--config",
+              `safety_identifier=${JSON.stringify(options.safetyIdentifier)}`,
+            ]),
+        ...(appServer
+          ? []
+          : [
+              "--sandbox",
+              validate ? "read-only" : "workspace-write",
+              ...(validate ? ["--config", 'web_search="disabled"'] : []),
+              ...(schemaPath === undefined
+                ? []
+                : ["--output-schema", schemaPath]),
+              "--skip-git-repo-check",
+              "--cd",
               directory,
-              prompt,
-              threadSource,
-              ...(options.externalSandbox ? { externalSandbox: true } : {}),
-              ...(options.cyberAccessProgram === undefined
-                ? {}
-                : { cyberAccessProgram: options.cyberAccessProgram }),
-              ...(verify || assess ? { sandbox: "read-only" as const } : {}),
-              ...(options.onEvent === undefined
-                ? {}
-                : { onEvent: options.onEvent }),
-            },
-          }
-        : {}),
-    },
-    options.environment ?? dependencies.environment,
-    appServer ? undefined : prompt,
-  );
+              "-",
+            ]),
+      ],
+      {
+        command: verify ? "verify-fix" : patch || assess ? "patch" : "validate",
+        signal,
+        auth: options.auth ?? "auto",
+        directory,
+        modelProvider: provider,
+        codexOverrides: effectiveOverrides,
+        stdout,
+        stderr,
+        ...(responseSchema === undefined ? {} : { responseSchema }),
+        ...(appServer
+          ? {
+              appServer: {
+                directory,
+                prompt,
+                threadSource,
+                ...(options.externalSandbox ? { externalSandbox: true } : {}),
+                ...(options.cyberAccessProgram === undefined
+                  ? {}
+                  : { cyberAccessProgram: options.cyberAccessProgram }),
+                ...(verify || assess ? { sandbox: "read-only" as const } : {}),
+                ...(options.onEvent === undefined
+                  ? {}
+                  : { onEvent: options.onEvent }),
+              },
+            }
+          : {}),
+      },
+      options.environment ?? dependencies.environment,
+      appServer ? undefined : prompt,
+    );
+  if (assess || !skillPromptRequiresFile(prompt)) return run(prompt);
+  const controller = new AbortController();
+  const signal = options.signal ?? controller.signal;
+  const removeSignals = options.signal
+    ? undefined
+    : listenForAbort(dependencies, controller);
+  try {
+    return await withSkillPrompt(prompt, (input) => run(input, signal), signal);
+  } catch (error) {
+    if (signal.aborted) return signal.reason === "SIGINT" ? 130 : 143;
+    throw error;
+  } finally {
+    removeSignals?.();
+  }
 }
 
 export async function readSkillCommandOutput(

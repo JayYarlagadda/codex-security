@@ -215,6 +215,11 @@ jobs:
       - name: Install ripgrep
         if: matrix.os == 'ubuntu-latest'
         run: .github/scripts/install-ripgrep.sh
+      - name: Enable user namespaces for native Codex tests
+        if: matrix.os == 'ubuntu-latest'
+        # Ubuntu's AppArmor policy otherwise blocks Codex sandbox startup.
+        # This setting applies only to the disposable test runner.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Test
         working-directory: sdk/typescript
         env:

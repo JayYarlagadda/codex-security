@@ -2488,6 +2488,14 @@ prepared in a temporary directory for Codex to read during the assessment, then
 removed. Context is separate from findings and checked against source evidence;
 feedback alone does not dismiss a finding.
 
+For local `validate`, `patch`, and `verify-fix` commands, a task that exceeds
+Codex's 1,048,576-character input limit is placed in a private temporary file.
+Codex receives a file reference and reads the complete task, including evidence
+and context, in sections. The original finding identifiers and result contract
+are retained. The file is removed after the worker finishes or the command is
+cancelled. Model context limits still apply; unread or insufficient evidence
+must be reported as a proof gap rather than a verified fix.
+
 By default, `validate` prints a readable assessment without JSON-schema checking.
 `--output-schema PATH` supplies the schema to Codex **before generation** using
 native structured output. The CLI also checks the completed JSON before writing
@@ -2682,10 +2690,10 @@ truncating any selected finding. The CLI prints verdicts in selection order
 after every request returns valid results. For these selections the CLI omits
 per-event progress and update notices so stderr cannot delay the verdicts.
 
-If one finding exceeds the input limit on its own, verification stops before
-the first request. The error reports its occurrence ID and required request
-size. To verify another open occurrence from that scan, run
-`codex-security verify-fix --scan SCAN_ID OCCURRENCE_ID`.
+If one finding exceeds the input limit on its own, it gets one request backed
+by the private input file described above. Its evidence and occurrence ID stay
+together, and later findings retain their selection order. To select one open
+occurrence from a scan, run `codex-security verify-fix --scan SCAN_ID OCCURRENCE_ID`.
 
 `--verification-mode static` selects source-only assessment, as described above
 for `patch`. Omit it or use `--verification-mode standard` for the default checks.

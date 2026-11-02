@@ -1,6 +1,7 @@
-import { throws } from "node:assert/strict";
+import { deepEqual, throws } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { closeSync, createWriteStream } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 import { main, runCodexSkillCommand } from "../../src/cli.js";
@@ -148,7 +149,20 @@ const base = dependencies({
       );
       return 0;
     }
-    if (batchWorker === 2 && scenario !== "repeated-main") await nextControl();
+    if (scenario === "pty-oversized" && batchWorker === 1) {
+      const path = JSON.parse(output!.appServer!.prompt.split("\n")[1]!);
+      const task = await readFile(path, "utf8");
+      deepEqual(JSON.parse(task.split("\n").at(-1)!), [
+        result.findings.findings[0],
+      ]);
+      await notify({ event: "oversized-input-read", occurrenceId: "occ_0" });
+    }
+    if (
+      batchWorker === 2 &&
+      scenario !== "repeated-main" &&
+      scenario !== "pty-oversized"
+    )
+      await nextControl();
 
     const id = `occ_${batchWorker - 1}`;
     if (batchWorker === 2 && scenario === "progress-success") {

@@ -248,13 +248,14 @@ test.skipIf(process.platform === "win32")(
     );
 
     const oversized = result(results, "pty-oversized");
-    expect(oversized.exit, diagnostics(oversized)).toBe(2);
-    expect(JSON.parse(oversized.stdout).message).toContain(
-      "Finding occ_0 cannot fit",
-    );
+    expect(oversized.exit, diagnostics(oversized)).toBe(0);
     expect(
-      oversized.events.some((event) => event["event"] === "worker-started"),
-    ).toBe(false);
+      JSON.parse(oversized.stdout).results.map(({ id }: { id: string }) => id),
+    ).toEqual(["occ_0", "occ_1", "occ_2"]);
+    expect(oversized.events).toContainEqual({
+      event: "oversized-input-read",
+      occurrenceId: "occ_0",
+    });
 
     for (const [scenario, expectedExit] of [
       ["pty-backpressure-sigint", 130],

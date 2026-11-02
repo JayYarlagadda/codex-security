@@ -40,8 +40,6 @@ export interface RemediationPromptInput {
   verificationMode?: z.infer<typeof VerificationModeSchema>;
 }
 
-export class VerificationFindingTooLargeError extends CodexSecurityError {}
-
 export async function verificationBatches(
   findings: readonly Finding[],
   pluginRoot: string,
@@ -63,9 +61,10 @@ export async function verificationBatches(
       characterCount(JSON.stringify(finding)) +
       characterCount(JSON.stringify(finding.occurrenceId));
     if (overhead + size > limit) {
-      throw new VerificationFindingTooLargeError(
-        `Finding ${finding.occurrenceId} cannot fit in one complete Codex verification request. The request requires ${overhead + size} characters, but Codex accepts at most ${limit}. To verify another finding from this scan, run codex-security verify-fix --scan SCAN_ID OCCURRENCE_ID. For this finding, run a narrower scan that records smaller evidence, then retry.`,
-      );
+      // The local CLI stages this complete finding in a private input file.
+      batches.push([finding]);
+      remaining = 0;
+      continue;
     }
     if (size > remaining) {
       batches.push([]);
