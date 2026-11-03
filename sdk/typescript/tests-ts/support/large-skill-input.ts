@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  execFileSync,
+  spawn,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -8,6 +12,12 @@ import { fileURLToPath } from "node:url";
 import { MAX_CODEX_INPUT_CHARACTERS } from "../../src/codex-prompt.js";
 import { resolveCodexCommand } from "../../src/runtime.js";
 import { scopedTemporaryDirectory } from "./temporary-directories.js";
+
+// Exercise the CLI and evidence reader with the supported Node runtime.
+const node = execFileSync("node", ["-p", "process.execPath"], {
+  encoding: "utf8",
+  windowsHide: true,
+}).trim();
 
 type Command = "validate" | "patch" | "verify-fix";
 interface ModelInput {
@@ -122,7 +132,7 @@ console.log(JSON.stringify({
           const cmd =
             (process.platform === "win32" ? "& " : "") +
             [
-              process.execPath,
+              node,
               reader,
               staged,
               ...(command === "patch"
@@ -255,10 +265,10 @@ console.log(JSON.stringify({
       if (process.env[key] !== undefined) environment[key] = process.env[key];
     const configuration = `model_providers.synthetic={name="Synthetic",base_url="${provider.url}v1",wire_api="responses",requires_openai_auth=false,supports_websockets=false,request_max_retries=0,stream_max_retries=0}`;
     cli = spawn(
-      process.execPath,
+      node,
       [
         fileURLToPath(
-          new URL("../fixtures/large-skill-input-driver.ts", import.meta.url),
+          new URL("../fixtures/large-skill-input-driver.mjs", import.meta.url),
         ),
         command,
         input,

@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import { main } from "../../src/cli.js";
+import { main } from "../../dist/cli.js";
 
 // The model child has its own stdin. This pipe controls the CLI's signal handlers
 // without depending on platform-specific console signal injection.
