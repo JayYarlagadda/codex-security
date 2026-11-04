@@ -171,17 +171,18 @@ console.log(JSON.stringify({
               item.call_id === "read-original-input",
           );
           const text = output?.output;
-          assert.ok(typeof text === "string");
+          assert.ok(typeof text === "string", JSON.stringify(output));
           assert.ok(
             text?.includes(digest),
-            "The native worker could not read the complete input",
+            "The native worker could not read the complete input:\n" + text,
           );
-          assert.ok(text.includes("synthetic-occurrence"));
-          assert.ok(text.includes('"tail":true'));
+          assert.ok(text.includes("synthetic-occurrence"), text);
+          assert.ok(text.includes('"tail":true'), text);
           if (command !== "patch")
             assert.ok(
               text.includes('"writeDenied":true'),
-              "Source writes were permitted during read-only assessment",
+              "Source writes were permitted during read-only assessment:\n" +
+                text,
             );
           readByWorker = true;
           item = {
@@ -297,7 +298,7 @@ console.log(JSON.stringify({
       Number(process.env["CODEX_SECURITY_TEST_TIMEOUT_MS"] ?? "30000") - 1000,
     );
     const [status] = await closed;
-    assert.deepEqual(errors, []);
+    assert.deepEqual(errors, [], stderr);
     assert.ok(staged, stderr);
     assert.equal(
       await lstat(dirname(staged)).then(
