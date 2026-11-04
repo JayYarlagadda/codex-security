@@ -182,6 +182,7 @@ import {
   modelProviderConfigOverride,
   resolveCommandAuthConfig,
   resolveCodexProfile,
+  normalizeLegacyWindowsSandboxOverride,
   mergedCodexConfig,
   readCodexFileProfile,
   scanModel,
@@ -1701,6 +1702,14 @@ export async function runCodexSkillCommand(
           ),
         ];
       }
+      if (output.appServer === undefined && process.platform === "win32") {
+        args = [
+          ...args,
+          ...skillWindowsConfigOverrides(
+            await readCodexHomeConfig(processEnvironment, output.signal),
+          ),
+        ];
+      }
       if (output.appServer === undefined) await releaseCredentialHome?.();
       processEnvironment = selected;
     }
@@ -1891,6 +1900,16 @@ export async function runCodexSkillCommand(
   } finally {
     await releaseCredentialHome?.();
   }
+}
+
+/** Keep an explicitly configured Windows backend when exec ignores user config. */
+function skillWindowsConfigOverrides(config: JsonObject): string[] {
+  const resolved = resolveCodexProfile(config);
+  normalizeLegacyWindowsSandboxOverride(resolved);
+  const windows = resolved["windows"];
+  return windows === undefined
+    ? []
+    : ["--config", "windows=" + inlineToml(windows)];
 }
 
 /**

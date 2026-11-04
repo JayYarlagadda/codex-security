@@ -32,6 +32,7 @@ export async function runLargeSkillInput(
   command: Command,
   signal?: "SIGINT" | "SIGTERM",
   applyPatch = false,
+  windowsSandbox = "unelevated",
 ) {
   await using temporary = await scopedTemporaryDirectory("large skill native-");
   const root = temporary.path;
@@ -40,6 +41,11 @@ export async function runLargeSkillInput(
   await Promise.all(
     [repository, home].map((path) => mkdir(path, { mode: 0o700 })),
   );
+  if (process.platform === "win32")
+    await writeFile(
+      join(home, "config.toml"),
+      `[windows]\nsandbox = ${JSON.stringify(windowsSandbox)}\nallow_mxc = false\n`,
+    );
   const finding = {
     occurrenceId: "synthetic-occurrence",
     evidence:

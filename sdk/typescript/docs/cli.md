@@ -2466,6 +2466,9 @@ select their original repository for patching.
 Basic patching also works in ordinary directories and Git worktrees before their
 first commit. Directory change tracking excludes `.git` and `.svn` metadata.
 
+On Windows, standalone validation forwards explicitly configured `[windows]`
+settings from your Codex home while keeping a read-only sandbox.
+
 ```bash
 codex-security validate "Possible SQL injection" --effort high
 codex-security validate findings.json --knowledge-base ./context --context "Check the tenant boundary."
