@@ -36,6 +36,17 @@ export async function runLargeSkillInput(
 ) {
   await using temporary = await scopedTemporaryDirectory("large skill native-");
   const root = temporary.path;
+  const checkParentPrivacy =
+    process.platform === "win32" && windowsSandbox === "elevated";
+  await using sibling = checkParentPrivacy
+    ? await scopedTemporaryDirectory("large skill private sibling-")
+    : null;
+  const siblingFile =
+    sibling === null ? undefined : join(sibling.path, "private.txt");
+  if (siblingFile !== undefined)
+    await writeFile(siblingFile, "Synthetic private sibling.\n", {
+      mode: 0o600,
+    });
   const repository = join(root, "repository");
   const home = join(root, "home");
   await Promise.all(
@@ -66,6 +77,18 @@ const crypto = require("node:crypto");
 const data = fs.readFileSync(process.argv[2]);
 const original = JSON.parse(JSON.parse(data.toString("utf8").split("\\n").at(-1))[0]);
 let writeDenied = false;
+let parentPrivate = true;
+if (${JSON.stringify(checkParentPrivacy)}) {
+  for (const read of [
+    () => fs.readdirSync(${JSON.stringify(dirname(root))}),
+    () => fs.readFileSync(${JSON.stringify(siblingFile)}),
+  ]) {
+    try { read(); parentPrivate = false; }
+    catch (error) {
+      if (!["EACCES", "EPERM"].includes(error.code)) throw error;
+    }
+  }
+}
 if (process.argv[3]) {
   try { fs.writeFileSync(process.argv[3], process.argv[4] === "apply-patch" ? ${JSON.stringify(patchedSource)} : "Synthetic forbidden write."); }
   catch (error) {
@@ -78,6 +101,7 @@ console.log(JSON.stringify({
   occurrenceId: original.occurrenceId,
   tail: original.evidence.endsWith("Final evidence: café 🔎"),
   writeDenied,
+  parentPrivate,
 }));
 `,
     { mode: 0o600 },
@@ -183,6 +207,8 @@ console.log(JSON.stringify({
             "The native worker could not read the complete input:\n" + text,
           );
           assert.ok(text.includes("synthetic-occurrence"), text);
+          if (checkParentPrivacy)
+            assert.ok(text.includes('"parentPrivate":true'), text);
           assert.ok(text.includes('"tail":true'), text);
           if (command !== "patch")
             assert.ok(
