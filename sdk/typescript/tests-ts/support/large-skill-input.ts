@@ -52,11 +52,23 @@ export async function runLargeSkillInput(
   await Promise.all(
     [repository, home].map((path) => mkdir(path, { mode: 0o700 })),
   );
-  if (process.platform === "win32")
+  if (process.platform === "win32") {
+    // The source fixture is readable by the sandbox account; evidence and
+    // runtime files remain in separate private directories.
+    execFileSync(
+      join(
+        process.env["SystemRoot"] ?? "C:\\Windows",
+        "System32",
+        "icacls.exe",
+      ),
+      [repository, "/grant:r", "*S-1-5-32-545:(OI)(CI)RX"],
+      { windowsHide: true },
+    );
     await writeFile(
       join(home, "config.toml"),
       `[windows]\nsandbox = ${JSON.stringify(windowsSandbox)}\nallow_mxc = false\n`,
     );
+  }
   const finding = {
     occurrenceId: "synthetic-occurrence",
     evidence:
